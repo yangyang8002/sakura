@@ -1097,6 +1097,13 @@ function optionsframework_options()
         'type' => 'textarea');
 
     $options[] = array(
+        'name' => __('Meting API fallback URL', 'sakura'),
+        'desc' => __('When the direct request to the music platform is blocked (e.g. NetEase -460 on datacenter IPs), the player fetches the stream through this public Meting API instead. Leave blank to use the default: https://api.injahow.cn/meting/', 'sakura'),
+        'id' => 'meting_api_fallback',
+        'std' => 'https://api.injahow.cn/meting/',
+        'type' => 'text');
+
+    $options[] = array(
         'name' => __('Version Control', 'sakura'), /*版本控制*/
         'desc' => __('Used to update frontend cookies and browser caches, any string can be used', 'sakura'), /*用于更新前端 cookie 及浏览器缓存，可使用任意字符串*/
         'id' => 'cookie_version',
