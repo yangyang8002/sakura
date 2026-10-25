@@ -25,8 +25,7 @@ class Aplayer
         if (!empty($cookies) && $server === "netease") $api->cookie($cookies);
         switch ($type) {
             case 'song':
-                $data = $api->format(true)->song($id);
-                $data = json_decode($data, true)["url"];
+                $data = $this->meting_with_fallback($api, 'song', $id);
                 $data = $this->song_url($data);
                 break;
             // case 'album':
@@ -42,20 +41,103 @@ class Aplayer
                 $data = $this->format_lyric($data);
                 break;
             case 'pic':
-                $data = $api->format(true)->pic($id);
-                $data = json_decode($data, true)["url"];
+                $data = $this->meting_with_fallback($api, 'pic', $id);
                 break;
             // case 'search':
             //     $data = $api->format(true)->search($id);
             //     $data=json_decode($data, true);
             //     break;
             default:
-                $data = $api->format(true)->url($id);
-                $data = json_decode($data, true)["url"];
+                $data = $this->meting_with_fallback($api, 'url', $id);
                 $data = $this->song_url($data);
                 break;
         }
         return $data;
+    }
+
+    /**
+     * Call the Meting client and fall back to a public Meting API when the
+     * direct request is blocked by platform risk control (e.g. NetEase -460
+     * "网络环境存在风险" returned for datacenter IPs).
+     */
+    private function meting_with_fallback($api, $method, $id) {
+        $raw = $api->format(true)->$method($id);
+        $value = $this->extract_meting_url($raw);
+        if ('' !== $value) {
+            return $value;
+        }
+        return $this->meting_api_fallback($method, $id);
+    }
+
+    private function extract_meting_url($raw) {
+        if (!is_string($raw) || '' === $raw) {
+            return '';
+        }
+        $json = json_decode($raw, true);
+        if (!is_array($json)) {
+            return '';
+        }
+        if (isset($json['code']) && (int) $json['code'] < 0) {
+            return '';
+        }
+        return (isset($json['url']) && is_string($json['url'])) ? $json['url'] : '';
+    }
+
+    private function meting_api_fallback($type, $id) {
+        $custom = trim((string) akina_option('meting_api_fallback'));
+        $candidates = array();
+        if ('' !== $custom) {
+            $candidates[] = $custom;
+        }
+        $candidates[] = 'https://music-api.gdstudio.xyz/api.php';
+        $candidates[] = 'https://api.injahow.cn/meting/';
+
+        foreach ($candidates as $base) {
+            $base = rtrim($base, '/');
+            $is_gdstudio = (false !== strpos($base, 'gdstudio'));
+            if ($is_gdstudio) {
+                $url = $base . '?types=' . rawurlencode($type) . '&source=' . rawurlencode($this->server) . '&id=' . rawurlencode($id) . '&br=320';
+            } else {
+                $url = $base . '/?server=' . rawurlencode($this->server) . '&type=' . rawurlencode($type) . '&id=' . rawurlencode($id);
+            }
+
+            $ch = curl_init($url);
+            curl_setopt_array($ch, array(
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_FOLLOWLOCATION => false,
+                CURLOPT_TIMEOUT        => 15,
+                CURLOPT_CONNECTTIMEOUT => 8,
+                CURLOPT_HEADER         => true,
+                CURLOPT_USERAGENT      => 'Mozilla/5.0 (compatible; Sakura-theme Meting fallback)',
+            ));
+            $raw = curl_exec($ch);
+            $code = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+            curl_close($ch);
+            if (false === $raw || '' === $raw) {
+                continue;
+            }
+
+            $body = $raw;
+            $location = '';
+            $split = strpos($raw, "\r\n\r\n");
+            if (false !== $split) {
+                $headers = substr($raw, 0, $split);
+                $body = substr($raw, $split + 4);
+                if (preg_match('/^location:\s*(\S+)/im', $headers, $m)) {
+                    $location = trim($m[1]);
+                }
+            }
+
+            if ($code >= 300 && $code < 400 && '' !== $location) {
+                return $location;
+            }
+
+            $value = $this->extract_meting_url($body);
+            if ('' !== $value) {
+                return $value;
+            }
+        }
+        return '';
     }
 
     private function format_playlist($data) {
